@@ -1,6 +1,5 @@
 DFD_GRIS_mejora.py
 # Macro FreeCAD: Direct Fusion Drive con TPS tipo Parker, ensamblado e imprimible (todo junto)
-# Autor: Víctor + Copilot
 # Unidades: mm, eje longitudinal = X
 
 import FreeCAD as App, FreeCADGui as Gui, Part, math
@@ -328,3 +327,4 @@ add_obj(compound, "Assembly_Compound")
 
 doc.recompute()
 print("Ensamblado completado: Assembly_Fused (única pieza) y Assembly_Compound (visual). Listo para exportar STL/STEP.")
+
