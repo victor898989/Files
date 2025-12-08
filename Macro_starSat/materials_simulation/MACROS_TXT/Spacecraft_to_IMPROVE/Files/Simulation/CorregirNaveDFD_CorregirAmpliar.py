@@ -1,6 +1,5 @@
 CorregirNaveDFD_CorregirAmpliar.py
 # Macro FreeCAD: Direct Fusion Drive con TPS tipo Parker montado en el morro
-# Autor: Víctor + Copilot
 # Unidades: mm, eje longitudinal = X
 
 import FreeCAD as App, FreeCADGui as Gui, Part, math
@@ -345,4 +344,5 @@ compound = Part.Compound([o.Shape for o in parts if hasattr(o, "Shape")])
 add_obj(compound, "Assembly_Compound")
 
 doc.recompute()
+
 print("Modelo actualizado con TPS y tramo posterior completado.")
