@@ -1,0 +1,324 @@
+# FreeCAD macro: Direct_Fusion_Drive_Expedition.FCMacro
+# Nave "Expedition" — macro robusta para un sólido CNC grande con tolerancias ESA/NASA
+# Ejecutar dentro de FreeCAD (Python console / Macros)
+import FreeCAD as App, FreeCADGui as Gui, Part, math, traceback
+doc_name="Direct_Fusion_Drive_Expedition"
+if App.ActiveDocument is None or App.ActiveDocument.Label!=doc_name:
+    App.newDocument(doc_name)
+doc=App.ActiveDocument
+
+# ---------------------------
+# Parámetros principales (ajustables)
+# ---------------------------
+scale = 3.5   # factor de escala global para "nave grande" (Andrómeda/Saturno clase)
+P = {
+    "nose_len":800.0*scale, "nose_base_d":600.0*scale,
+    "mid_len":1400.0*scale, "mid_d":900.0*scale,
+    "rear_len":800.0*scale, "rear_d":1200.0*scale,
+    "hull_t":30.0,              # espesor de carcasa principal (mm)
+    "shield_t":80.0,            # espesor blindaje de alta densidad (mm)
+    "impact_t":60.0,            # capa amortiguadora interior (mm)
+    "inner_clearance":200.0,    # espacio interior libre para equipos (mm)
+    "reactor_d":800.0*scale, "reactor_l":900.0*scale, "reactor_cx":2600.0*scale,
+    "nozzle_throat_d":300.0*scale, "nozzle_exit_d":900.0*scale, "nozzle_l":900.0*scale,
+    "nozzle_cx":2850.0*scale, "nozzle_fillet_r":80.0,
+    "ring_h":40.0, "ring_ro":420.0, "ring_ri":380.0, "ring_n":8, "ring_pitch":160.0*scale,
+    "bolt_d":20.0, "bolt_clearance":1.0, "bolt_pattern_n":48, "flange_d":1400.0*scale,
+    "whipple_bumper_t":10.0, "whipple_standoff":300.0, "whipple_back_t":50.0,
+    "tol_machine":0.3,          # tolerancia de mecanizado típica (mm)
+    "assembly_clearance":0.8,   # holgura de montaje (mm)
+    "min_fillet":6.0,           # radio fillet mínimo práctico (mm)
+    "mass_goal":None,           # si se quiere optimizar por masa (kg)
+    "verbose":True
+}
+
+# Materiales (simplificado)
+MAT = {
+    'AL':{'name':'AA-7075','rho':2810.0,'E':71e9,'nu':0.33},
+    'STEEL':{'name':'SS-316L','rho':8000.0,'E':200e9,'nu':0.30},
+    'W':{'name':'Tungsten','rho':19300.0,'E':400e9,'nu':0.28},
+    'CFRP':{'name':'CFRP','rho':1600.0},
+    'KEVLAR':{'name':'Kevlar','rho':1440.0},
+    'POLY':{'name':'Polyethylene','rho':950.0},
+    'BORON':{'name':'BoronCarbide','rho':2520.0}
+}
+
+# Vectores y utilidades
+X=App.Vector(1,0,0); Y=App.Vector(0,1,0); Z=App.Vector(0,0,1)
+def R(): return App.Rotation(Y,90)
+def O(s,name):
+    obj = doc.addObject("Part::Feature", name)
+    obj.Shape = s
+    return obj
+def M(o,mat):
+    if not o: return
+    d = MAT.get(mat,{})
+    try:
+        o.addProperty("App::PropertyString","Material","Meta","").Material = d.get("name","")
+        o.addProperty("App::PropertyFloat","Density","Meta","").Density = d.get("rho",0.0)
+    except Exception:
+        pass
+
+def safe(val, minv=1.0): return val if val>minv else minv
+
+# Primitivas básicas centradas en X eje
+def C(d,L,cx=0,cy=0,cz=0,name="C"):
+    s=Part.makeCylinder(d/2,L)
+    s.Placement=App.Placement(App.Vector(cx-L/2,cy,cz),R())
+    return O(s,name)
+
+def K(d1,d2,L,cx=0,cy=0,cz=0,name="K"):
+    s=Part.makeCone(d1/2,d2/2,L)
+    s.Placement=App.Placement(App.Vector(cx-L/2,cy,cz),R())
+    return O(s,name)
+
+def B(w,d,h,cx=0,cy=0,cz=0,name="B"):
+    s=Part.makeBox(w,d,h)
+    s.Placement=App.Placement(App.Vector(cx-w/2,cy-d/2,cz-h/2),App.Rotation())
+    return O(s,name)
+
+def fillet_large(solid, r):
+    try:
+        edges=[e for e in solid.Edges if e.Length> (r*0.5)]
+        return solid.makeFillet(r, edges)
+    except Exception:
+        return solid
+
+def fuse_shapes(objs):
+    # Fuse list of Part::Feature objects robustly
+    if not objs: return None
+    s = objs[0].Shape
+    for o in objs[1:]:
+        try:
+            s = s.fuse(o.Shape)
+        except Exception as e:
+            if P["verbose"]:
+                print("Aviso fuse parcial:", e)
+            try:
+                s = s.fuse(o.Shape.copy())
+            except:
+                pass
+    return s
+
+def cut_shape(a, b):
+    try:
+        return a.cut(b)
+    except Exception as e:
+        if P["verbose"]:
+            print("Aviso cut fallo:", e)
+        return None
+
+# ---------------------------
+# 1) Construir fuselaje externo grande (nose, mid, rear) y filetear
+# ---------------------------
+if P["verbose"]: print("1) Construyendo fuselaje externo escalado x", scale)
+nose = K(P["nose_base_d"], 0, P["nose_len"], P["nose_len"]/2, name="nose_ext"); M(nose,"AL")
+mid  = C(P["mid_d"], P["mid_len"], P["nose_len"]+P["mid_len"]/2, name="mid_ext"); M(mid,"AL")
+rear = C(P["rear_d"], P["rear_len"], P["nose_len"]+P["mid_len"]+P["rear_len"]/2, name="rear_ext"); M(rear,"AL")
+outer_shape = fuse_shapes([nose, mid, rear])
+outer_shape = fillet_large(outer_shape, P["min_fillet"]*2)
+OuterHull = O(outer_shape,"OuterHull"); M(OuterHull,"AL")
+
+# 2) Interior (clearance) — evitar offsets problemáticos usando primitivas interiores reducidas
+if P["verbose"]: print("2) Generando cavidad interior (clearance) y capa estructural interna")
+h_total = P["hull_t"] + P["shield_t"] + P["impact_t"] + P["inner_clearance"]
+nose_in_d = safe(P["nose_base_d"] - 2*h_total)
+mid_in_d  = safe(P["mid_d"] - 2*h_total)
+rear_in_d = safe(P["rear_d"] - 2*h_total)
+nose_in = K(nose_in_d, 0, max(50.0, P["nose_len"]-2*P["hull_t"]), P["nose_len"]/2, name="nose_int"); M(nose_in,"CFRP")
+mid_in  = C(mid_in_d, max(200.0, P["mid_len"]-2*P["hull_t"]), P["nose_len"]+P["mid_len"]/2, name="mid_int"); M(mid_in,"CFRP")
+rear_in = C(rear_in_d, max(200.0, P["rear_len"]-2*P["hull_t"]), P["nose_len"]+P["mid_len"]+P["rear_len"]/2, name="rear_int"); M(rear_in,"CFRP")
+inner_shape = fuse_shapes([nose_in, mid_in, rear_in])
+inner_shape = fillet_large(inner_shape, P["min_fillet"])
+InnerHull = O(inner_shape,"InnerHull"); M(InnerHull,"CFRP")
+
+# 3) Shell principal: Outer - Inner (intenta generar carcasa sólida)
+if P["verbose"]: print("3) Creando carcasa principal (OuterHull - InnerHull)")
+try:
+    hull_shell = OuterHull.Shape.cut(InnerHull.Shape)
+    hull_shell = fillet_large(hull_shell, P["min_fillet"])
+    HullShell = O(hull_shell,"HullShell"); M(HullShell,"AL")
+except Exception as e:
+    print("Fallo corte Outer-Inner:", e)
+    # Fallback: offset externo simple
+    try:
+        inner_offset = outer_shape.makeOffsetShape(-(P["hull_t"]+P["shield_t"]+P["impact_t"]), 0.01, join=2, fill=True)
+        hull_shell = outer_shape.cut(inner_offset)
+        HullShell = O(hull_shell,"HullShell_offset"); M(HullShell,"AL")
+    except Exception as e2:
+        print("Fallback offset también falló:", e2)
+        HullShell = OuterHull
+        print("Se usará OuterHull como carcasa (sólido simple).")
+
+# 4) Blindaje radiológico multicapa alrededor del núcleo/reactor
+if P["verbose"]: print("4) Construyendo blindajes radiológicos y moderadores")
+try:
+    reactor_ext = C(P["reactor_d"] + 2*P["shield_t"], P["reactor_l"] + 2*P["shield_t"], P["reactor_cx"], name="reactor_shield_ext"); M(reactor_ext,"W")
+    # Moderador (polyethylene) por fuera del tungsteno para moderar neutrones
+    moderator = C(P["reactor_d"] + 2*(P["shield_t"]+60.0), P["reactor_l"] + 2*(P["shield_t"]+60.0), P["reactor_cx"], name="reactor_moderator"); M(moderator,"POLY")
+    # Liner de boron para captura
+    boron_liner = C(P["reactor_d"] + 2*(P["shield_t"]+80.0), P["reactor_l"] + 2*(P["shield_t"]+80.0), P["reactor_cx"], name="reactor_boron"); M(boron_liner,"BORON")
+    shield_comp = fuse_shapes([reactor_ext, moderator, boron_liner])
+    ShieldAssembly = O(shield_comp,"ShieldAssembly"); M(ShieldAssembly,"W")
+except Exception as e:
+    print("Error creando blindaje:", e)
+    ShieldAssembly = reactor_ext if 'reactor_ext' in locals() else None
+
+# 5) Whipple shield para micrometeoritos / debris (bumper + standoff + back panel)
+if P["verbose"]: print("5) Añadiendo Whipple shield frontal")
+try:
+    bumper_radius = P["nose_base_d"]/2 + 200.0
+    bumper = Part.makeCylinder(bumper_radius, P["whipple_bumper_t"])
+    bumper.Placement = App.Placement(App.Vector(P["nose_len"]/2 - P["whipple_bumper_t"]/2, 0, 0), R())
+    bumper_obj = O(bumper, "Whipple_Bumper"); M(bumper_obj,"AL")
+    back_panel = Part.makeCylinder(bumper_radius - 20.0, P["whipple_back_t"])
+    back_panel.Placement = App.Placement(App.Vector(P["nose_len"]/2 + P["whipple_standoff"], 0, 0), R())
+    back_obj = O(back_panel, "Whipple_Back"); M(back_obj,"AL")
+    Whipple = fuse_shapes([bumper_obj, back_obj])
+    WhippleO = O(Whipple, "WhippleAssembly"); M(WhippleO,"AL")
+except Exception as e:
+    print("Error creating Whipple shield:", e)
+    WhippleO = None
+
+# 6) Nozzle reforzado y filetes de unión
+if P["verbose"]: print("6) Construyendo tobera (nozzle) reforzada")
+try:
+    noz = K(P["nozzle_exit_d"], P["nozzle_throat_d"], P["nozzle_l"], P["nozzle_cx"], name="nozzle_ext"); M(noz,"STEEL")
+    noz_shape = fillet_large(noz.Shape, P["nozzle_fillet_r"])
+    Nozzle = O(noz_shape,"Nozzle"); M(Nozzle,"STEEL")
+except Exception as e:
+    print("Nozzle creation error:", e)
+    Nozzle = noz if 'noz' in locals() else None
+
+# 7) Anillos estructurales (refuerzos) alrededor del motor/rear
+if P["verbose"]: print("7) Añadiendo anillos estructurales")
+rings=[]
+x0 = P["reactor_cx"] - P["reactor_l"]/2 + P["ring_h"]/2
+for i in range(P["ring_n"]):
+    try:
+        t = Part.makeTorus((P["ring_ro"]+P["ring_ri"])/2, (P["ring_ro"]-P["ring_ri"])/2)
+        t.Placement = App.Placement(App.Vector(x0 + i*P["ring_pitch"], 0, 0), R())
+        rings.append(O(t, "Ring_%d"%i))
+        M(rings[-1],"STEEL")
+    except Exception as e:
+        print("Ring creation fail:", e)
+rings_shape = fuse_shapes(rings) if rings else None
+RingsO = O(rings_shape, "Rings") if rings_shape else None
+if RingsO: M(RingsO,"STEEL")
+
+# 8) Brida de acoplamiento / docking con patrón de pernos (preparada con holgura de montaje)
+if P["verbose"]: print("8) Creando brida de acoplamiento con patrón de pernos")
+try:
+    flange_radius = P["flange_d"]/2
+    flange = Part.makeCylinder(flange_radius, 60.0)  # 60mm grosor de brida
+    flange.Placement = App.Placement(App.Vector(P["nose_len"]+P["mid_len"]+30.0,0,0),R())
+    # Crear patrón de agujeros (clearance + tol)
+    bolt_holes = []
+    n = P["bolt_pattern_n"]
+    for i in range(n):
+        ang = 2*math.pi*i/n
+        x = flange_radius*0.75*math.cos(ang)
+        y = flange_radius*0.75*math.sin(ang)
+        hole = Part.makeCylinder(P["bolt_d"]/2 + P["bolt_clearance"] + P["assembly_clearance"], 80.0)
+        hole.Placement = App.Placement(App.Vector(flange.Placement.Base.x, x, y), App.Rotation())
+        bolt_holes.append(hole)
+    # Subtract holes from flange
+    flange_shape = flange
+    for h in bolt_holes:
+        try:
+            flange_shape = flange_shape.cut(h)
+        except Exception:
+            pass
+    FlangeO = O(flange_shape, "Docking_Flange"); M(FlangeO,"STEEL")
+except Exception as e:
+    print("Flange fail:", e)
+    FlangeO = None
+
+# 9) Añadir escotilla de acceso con tolerancia (cut con chaflán)
+if P["verbose"]: print("9) Añadiendo escotilla de acceso (approx)")
+try:
+    hatch_w = 1200.0*scale; hatch_h = 800.0*scale
+    hatch = Part.makeBox(hatch_w, hatch_h, 50.0)
+    hatch.Placement = App.Placement(App.Vector(P["nose_len"]+200.0, 0 - hatch_w/2, 0 - hatch_h/2), App.Rotation(App.Vector(0,0,1),0))
+    # chaflán simple como sustractor
+    chamfer = Part.makeCylinder(hatch_h*0.6, 200.0)
+    chamfer.Placement = App.Placement(App.Vector(P["nose_len"]+200.0 + 20.0,0,0),R())
+    hatch_shaped = hatch.cut(chamfer)
+    HatchO = O(hatch_shaped,"Access_Hatch"); M(HatchO,"AL")
+except Exception as e:
+    print("Hatch fail:", e)
+    HatchO = None
+
+# 10) Fusionar componentes principales en un solo sólido apto para STEP/CNC
+if P["verbose"]: print("10) Fusionando componentes principales para generar Solid_CNC_Expedition")
+to_fuse = [HullShell, ShieldAssembly, ImpactLayer if 'ImpactLayer' in globals() else None, WhippleO, Nozzle, RingsO, FlangeO]
+# ensure non-None and unique
+shapes = []
+seen_ids=set()
+for obj in to_fuse:
+    if obj is None: continue
+    if id(obj) in seen_ids: continue
+    seen_ids.add(id(obj))
+    shapes.append(obj.Shape)
+final_shape = shapes[0] if shapes else OuterHull.Shape
+for s in shapes[1:]:
+    try:
+        final_shape = final_shape.fuse(s)
+    except Exception as e:
+        print("Fuse parcial en final_shape:", e)
+        try:
+            final_shape = final_shape.fuse(s.copy())
+        except:
+            pass
+
+# Intenta convertir shells en sólido
+try:
+    Solid_final = final_shape
+    # si tiene shells, intentar makeSolid por la primera Shell
+    if hasattr(final_shape, "Shells") and len(final_shape.Shells)>0:
+        try:
+            Solid_final = Part.makeSolid(final_shape.Shells[0])
+        except Exception:
+            Solid_final = final_shape
+    Solid_CNC = O(Solid_final, "Solid_CNC_Expedition"); M(Solid_CNC,"STEEL")
+    if P["verbose"]: print("Solid_CNC_Expedition creado.")
+except Exception as e:
+    print("No se pudo generar Solid_CNC_Expedition:", e)
+    Solid_CNC = O(final_shape, "Solid_CNC_Expedition_fallback"); M(Solid_CNC,"STEEL")
+
+# 11) Estimación de masas por componente (si son sólidos válidos)
+if P["verbose"]: print("11) Estimando volúmenes y masa (aprox.)")
+def approx_mass(obj):
+    try:
+        vol = obj.Shape.Volume  # mm^3
+        dens = getattr(obj, "Density", None)
+        if dens is None:
+            try:
+                dens = obj.Density
+            except:
+                dens = 2700.0
+        mass_kg = vol * 1e-9 * dens
+        return vol, mass_kg
+    except Exception:
+        return None, None
+
+report=[]
+for name,obj in [("OuterHull",OuterHull),("InnerHull",InnerHull),("HullShell",HullShell),
+                  ("ShieldAssembly", ShieldAssembly),("Whipple",WhippleO),("Nozzle",Nozzle),("Rings",RingsO),("Flange",FlangeO),("AccessHatch",HatchO)]:
+    if obj is None: continue
+    v,m = approx_mass(obj)
+    report.append((name, v, m))
+
+total_mass = 0.0
+for r in report:
+    if r[2]: total_mass += r[2]
+
+# crear tabla simple en consola
+print("---- Estimación de masa (componentes) ----")
+for name,vol,mass in report:
+    print("%-12s  Vol(mm3): %s  Masa(kg): %s" % (name, ("%.3e"%vol if vol else "n/a"), ("%.2f"%mass if mass else "n/a")))
+print("Masa total aproximada (kg): %.2f" % total_mass)
+
+doc.recompute()
+print("Macro completada: Nave 'Expedition' generada. Revisa el árbol para Solid_CNC_Expedition y subcomponentes.")
+print("Recomendaciones: ejecutar Part→Check geometry en Solid_CNC_Expedition y exportar a STEP para CAM/FEA.")
