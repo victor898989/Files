@@ -1,0 +1,428 @@
+# Guía Completa - Spacecraft CAD Generation API v4.0
+
+## Tabla de Contenidos
+1. [Inicio rápido](#inicio-rápido)
+2. [Conceptos fundamentales](#conceptos-fundamentales)
+3. [Ejemplos de uso](#ejemplos-de-uso)
+4. [API Referencia](#api-referencia)
+5. [Variantes de naves](#variantes-de-naves)
+6. [Exportación y reportes](#exportación-y-reportes)
+7. [Solución de problemas](#solución-de-problemas)
+
+## Inicio Rápido
+
+### Instalación
+```python
+# En FreeCAD Python Console o como macro
+exec(open('/path/to/dfdGreysca02.py').read())
+
+# O directamente como macro de FreeCAD
+# Copiar el contenido del archivo a Macro > Create macro > Ejecutar
+```
+
+### Ejemplo Mínimo
+```python
+# Crear une nave en 3 pasos
+nave = ParametricSpacecraft('DFD-XL')
+nave.create_all_parts()
+nave.generate_report()
+```
+
+### Creación con Personalización
+```python
+# Crear nave escalada 50% más grande
+nave = ParametricSpacecraft('DFD-XL')
+nave.scale_spacecraft(1.5)     # 150% de tamaño
+nave.create_all_parts()
+nave.export_all('./output/', format='stl')
+```
+
+## Conceptos Fundamentales
+
+### Arquitectura de Clases
+
+```
+ParametricSpacecraft (Controlador principal)
+├── GeometryHelper (Utilidades de geometría)
+├── MaterialManager (Sistema de materiales)
+└── Subsistemas del usuario:
+    ├── create_hull() - Fuselaje
+    ├── create_reactor() - Propulsión
+    ├── create_thermal_shield() - TPS
+    ├── create_solar_panels() - Energía
+    ├── create_antennas() - Comunicación
+    ├── create_landing_gear() - Despliegue
+    └── ... (22 subsistemas más)
+```
+
+### Diccionario de Parámetros (P)
+
+Todos los parámetros dimensionales se almacenan en `P`:
+
+```python
+nave = ParametricSpacecraft()
+print(nave.P['nose_len'])       # 1500 mm
+print(nave.P['mid_d'])          # 1800 mm
+print(nave.P['reactor_d'])      # 1500 mm
+
+# Modificar directamente
+nave.P['nose_len'] = 2000.0
+nave.P['panel_count'] = 6
+```
+
+### Sistema de Materiales
+
+Acceso a 20+ materiales predefinidos:
+
+```python
+MATERIALS_DATABASE = {
+    'AL_7075': {...},           # Aluminio de alta resistencia
+    'STEEL_304': {...},         # Acero inoxidable
+    'CFRP_QUASI': {...},        # Fibra de carbono
+    'TPS_CC': {...},            # Carbón-carbono para escudo térmico
+    'TITANIUM_6_4': {...},      # Titanio para alta temperatura
+    # ... 15 materiales más
+}
+```
+
+## Ejemplos de Uso
+
+### Ejemplo 1: Nave Estándar Completa
+
+```python
+# Crear nave DFD-XL completa
+nave = ParametricSpacecraft(variant='DFD-XL')
+
+# Validar parámetros
+nave.validate_parameters()
+
+# Crear todas las partes (33 componentes)
+nave.create_all_parts(verbose=True)
+
+# Obtener información
+print(f"Componentes: {len(nave.parts)}")
+print(f"Longitud: {nave.get_total_length()} mm")
+print(f"Diámetro max: {nave.get_max_diameter()} mm")
+
+# Generar reporte técnico
+reporte = nave.generate_report('nave_report.json')
+```
+
+### Ejemplo 2: Variante Personalizada
+
+```python
+# Crear variante cargo (fuselaje largo, mínimo reactor)
+nave_cargo = ParametricSpacecraft('DFD-XL-CARGO')
+
+# Modificar parámetros antes de crear
+nave_cargo.P['mid_len'] = 5000.0      # Fuselaje más largo
+nave_cargo.P['mid_d'] = 2200.0        # Diámetro aumentado
+nave_cargo.P['reactor_d'] = 800.0     # Reactor más pequeño
+nave_cargo.P['panel_count'] = 8       # Más paneles solares
+
+# Crear partes
+nave_cargo.create_all_parts()
+
+# Exportar
+nave_cargo.export_all('./cargo_variant/', format='stl')
+```
+
+### Ejemplo 3: Análisis Comparativo
+
+```python
+# Crear dos variantes
+nave_normal = create_standard_spacecraft('DFD-XL')
+nave_ligera = create_standard_spacecraft('DFD-XL')
+nave_ligera.scale_spacecraft(0.75)
+nave_ligera.create_all_parts()
+
+# Comparar
+nave_normal.compare_with_other(nave_ligera, aspects=['mass', 'volume', 'parts'])
+
+# Cálculos individuales
+masa_normal = nave_normal.calculate_total_mass()
+masa_ligera = nave_ligera.calculate_total_mass()
+print(f"Diferencia: {masa_normal - masa_ligera:.0f}g")
+```
+
+### Ejemplo 4: Exportación Batch
+
+```python
+# Crear y exportar múltiples variantes
+variantes = ['DFD-XL', 'Parker', 'Fusion-Drive']
+
+for var in variantes:
+    nave = create_standard_spacecraft(var)
+    nave.export_all(f'./exports/{var}/', format='step')
+    nave.generate_report(f'./reports/{var}_report.json')
+
+print("✓ Lote exportado exitosamente")
+```
+
+## API Referencia
+
+### Clase ParametricSpacecraft
+
+#### Constructor
+```python
+__init__(variant='DFD-XL', doc_name=None)
+```
+
+| Parámetro | Tipo | Descripción |
+|-----------|------|-------------|
+| `variant` | str | Tipo de nave: 'DFD-XL', 'Parker', 'Fusion-Drive' |
+| `doc_name` | str | Nombre documento FreeCAD (auto-generado si None) |
+
+#### Métodos Principales
+
+```python
+# Crear geometría
+nave.create_all_parts(verbose=True)          # Crea 33 componentes
+nave.scale_spacecraft(factor)                # Escala todos los parámetros
+nave.validate_parameters()                   # Valida dimensional
+
+# Análisis
+nave.calculate_total_mass()                  # Retorna gramos
+nave.calculate_total_volume()                # Retorna mm³
+nave.get_bounding_box()                      # Retorna dict con dimensiones
+nave.get_total_length()                      # Retorna longitud en mm
+nave.get_max_diameter()                      # Retorna diámetro máximo
+
+# Reportes y Exportación
+nave.generate_report(save_file='report.json')  # Reporte técnico JSON
+nave.export_all(output_dir, format='stl')      # Exporta todos componentes
+nave.export_stl(filename, part_name=None)      # Exporta STL individual
+
+# Información
+nave.get_part_list()                         # Lista de componentes
+nave.get_variant_parameters()                # Retorna dict P
+nave.compare_with_other(otra_nave, aspects=['mass']) # Compara dos naves
+
+# Variantes predefinidas
+nave.create_variant_light()                  # 70% de tamaño
+nave.create_variant_heavy()                  # 130% de tamaño
+nave.create_variant_cargo()                  # Optimizada para carga
+```
+
+### Funciones de Módulo
+
+```python
+# Crear nave estándar
+nave = create_standard_spacecraft(variant='DFD-XL', scale_factor=1.0)
+
+# Crear comparación
+naves = create_comparison(['DFD-XL', 'Parker'])
+
+# Crear y exportar batch
+nave = create_export_batch(variant='DFD-XL', 
+                          output_dir='./exports/',
+                          formats=['stl', 'step', 'iges'])
+```
+
+### Sistema de Materiales
+
+```python
+# Acceder a material
+mat = MATERIALS_DATABASE['AL_7075']
+print(mat['density'])        # den kg/m³
+print(mat['yield'])          # límite elástico Pa
+print(mat['T_max'])          # temperatura máxima K
+print(mat['uses'])           # aplicaciones
+
+# Asignar a componente
+materials = MaterialManager()
+materials.assign_material(freecad_obj, 'CFRP_QUASI')
+
+# Calcular masa de componente
+masa_g = materials.get_mass(obj, 'STEEL_304')
+```
+
+## Variantes de Naves
+
+### DFD-XL (por defecto)
+- Configuración de reconocimiento
+- Paneles solares 4x
+- Antenas dual (baja/alta ganancia)
+- Reactor potente
+- Instrumentos científicos completos
+
+```python
+nave = ParametricSpacecraft('DFD-XL')
+# Longitud: 6000mm | Diámetro: 2200mm | Paneles: 4
+```
+
+### Parker
+- Variante especial aproximación solar
+- Escudo TPS mejorado
+- Sistema de refrigeración avanzado
+- Reactor medio
+
+```python
+nave = ParametricSpacecraft('Parker')
+```
+
+### Fusion-Drive
+- Propulsión por fusión
+- Reactor grande
+- Fuselaje compacto
+- Panel solar único
+
+```python
+nave = ParametricSpacecraft('Fusion-Drive')
+```
+
+### Variantes Generadas
+
+```python
+# Variante automática LIGHT
+nave = ParametricSpacecraft('DFD-XL')
+nave.create_variant_light()      # 70% tamaño
+
+# Variante automática HEAVY
+nave = ParametricSpacecraft('DFD-XL')  
+nave.create_variant_heavy()      # 130% tamaño
+
+# Variante CARGO personalizada
+nave = ParametricSpacecraft('DFD-XL')
+nave.create_variant_cargo()      # Optimizada carga
+```
+
+## Exportación y Reportes
+
+### Exportar a STL (Impresión 3D)
+
+```python
+# Exportar todas las partes
+nave.export_all('./output/', format='stl')
+
+# Exportar parte individual
+nave.export_stl('fuselaje.stl', part_name='01_Hull_Main')
+
+# Configuración impresión 3D
+nave.P['print_tolerance'] = 0.3      # Tolerancia de impresión
+nave.P['overlap'] = 2.0              # Solape para adherencia robusta
+```
+
+### Exportar a STEP/IGES (CAD Profesional)
+
+```python
+# Exportar STEP (compatible CAD)
+nave.export_all('./output/', format='step')
+
+# Exportar IGES
+nave.export_all('./output/', format='iges')
+```
+
+### Generar Reportes
+
+```python
+# Reporte JSON completo
+reporte = nave.generate_report('nave_report.json')
+
+# Contenido del reporte
+{
+  'variant': 'DFD-XL',
+  'specifications': {
+    'total_length_mm': 6000,
+    'max_diameter_mm': 2200,
+    'total_mass_grams': 50000,
+    'total_volume_mm3': 8.5e9,
+    'total_components': 33
+  },
+  'material_breakdown': {
+    'AL_7075': 30000g,
+    'CFRP_QUASI': 15000g,
+    'STEEL_304': 5000g
+  }
+}
+```
+
+## Solución de Problemas
+
+### Problema: "Material no existe"
+```python
+# Solución: Usar materiales predefinidos
+print(MATERIALS_DATABASE.keys())  # Ver disponibles
+nave.materials.assign_material(obj, 'AL_7075')  # Usar existente
+```
+
+### Problema: Exportación STL muy lenta
+```python
+# Solución: Exportar componentes individuales
+nave.export_stl('fuselaje.stl', part_name='01_Hull_Main')
+nave.export_stl('reactor.stl', part_name='05_Reactor_Core')
+# Luego procesar por separado
+```
+
+### Problema: Parámetros inválidos
+```python
+# Solución: Validar antes de crear
+if nave.validate_parameters():
+    nave.create_all_parts()
+else:
+    print("Revisar parámetros")
+    nave.P['nose_len'] = 2000.0  # Corregir
+```
+
+### Problema: Memoria insuficiente con componentes grandes
+```python
+# Solución: Crear sin recompile automático
+nave.P['scale'] = 0.5  # Escalar primero
+nave.create_all_parts(verbose=False)
+nave.doc.recompute()   # Recompilación manual
+```
+
+## Consejos y Mejores Prácticas
+
+### 1. Documentación de Cambios
+```python
+nave = ParametricSpacecraft('DFD-XL')
+nave.P['mid_len'] = 5000.0  # CAMBIO: Fuselaje extensible
+nave.create_all_parts()
+```
+
+### 2. Validación progr ativa
+```python
+nave = ParametricSpacecraft('DFD-XL')
+
+# Step 1: Crear estructura mínima
+nave.create_hull()
+
+# Step 2: Añadir sistemas
+nave.create_reactor()
+nave.create_solar_panels()
+
+# Step 3: Validar antes de completar
+if nave.validate_parameters():
+    nave.create_all_parts()
+```
+
+### 3. Variaciones Iterativas
+```python
+# Comparar 3 escalas
+for factor in [0.8, 1.0, 1.2]:
+    nave = ParametricSpacecraft(f'DFD-{factor}')
+    nave.scale_spacecraft(factor)
+    nave.create_all_parts()
+    nave.export_all(f'./DFD_{factor*100:.0f}/')
+```
+
+### 4. Usar templates predefinidos
+```python
+# En lugar de modificar todo manualmente
+nave = ParametricSpacecraft('DFD-XL')
+nave.create_variant_cargo()  # Ya optimizada
+# O crear personalizado:
+nave.create_variant_light()
+```
+
+## Contacto y Contribuciones
+
+Para contribuir nuevas características o reportar bugs:
+- Revisar código en [dfdGreysca02.py](dfdGreysca02.py)
+- Consultar [.github/copilot-instructions.md](.github/copilot-instructions.md)
+
+---
+**Version**: 4.0 Professional Edition  
+**Última actualización**: Marzo 2026  
+**Autor**: Víctor + Copilot
